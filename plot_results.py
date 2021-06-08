@@ -12,6 +12,71 @@ import os
 #
 ########################################################
 
+
+def process_files(path, line, cols):
+    """
+    Function that reads all files in a directory and fixes the headers using the line number and columns
+    :param path: directory of files
+    :param line: the line number the header should be
+    :param cols: the string for the column headings
+    :return:
+    """
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            if ".csv" in name:
+                # Read from file and replace specified line with columns heading
+                filename = os.path.join(root, name)
+                f = open(filename, 'r')
+                content = f.readlines()
+                f.close()
+                content[line-1] = cols+'\n'
+
+                # convert the list of strings into 1 string
+                content = ''.join([str(elem) for elem in content])
+
+                # open the file again and overwrite with modified content
+                f = open(filename, 'w')
+                f.write(content)
+                f.close()
+
+    return
+
+
+def fix_complex(path):
+    """
+    Function for changing i to j in Comsol data to match Python conventions for complex numbers
+    :param path: directory of files
+    :return:
+    """
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            if ".csv" in name:
+                # Read the data into dataframe object
+                filename = os.path.join(root, name)
+                df = pd.read_csv(filename, sep=',', header=8)
+
+                # Can ignore X and Y because they're stored as real numbers
+                # Turn Ex, Ey, Ez into arrays
+                ex = df['Ex'].to_numpy()
+                if isinstance(ex[0], str):
+                    ex = np.array([ex[n].replace('i', 'j') for n in range(ex.size)], dtype=complex)
+
+                ey = df['Ey'].to_numpy()
+                if isinstance(ey[0], str):
+                    ey = np.array([ey[n].replace('i', 'j') for n in range(ey.size)], dtype=complex)
+
+                ez = df['Ez'].to_numpy()
+                if isinstance(ez[0], str):
+                    ez = np.array([ez[n].replace('i', 'j') for n in range(ez.size)], dtype=complex)
+
+                # Create new dataframe using the fixed data
+                dict = {'X': df['X'].to_numpy(), 'Y': df['Y'].to_numpy(), 'Ex': ex, 'Ey': ey, 'Ez': ez, 'd': df['d'].to_numpy()}
+                cols = ['X', 'Y', 'Ex', 'Ey', 'Ez', 'd']
+                out = pd.DataFrame(dict, columns=cols)
+                out.to_csv(filename)
+    return
+
+
 def get_data(df, rows):
     """
     Function for getting data from a DataFrame along rows
@@ -26,107 +91,6 @@ def get_data(df, rows):
     ez = np.array([df.at[row, 'Ez'] for row in rows], dtype=complex)
     return x, y, ex, ey, ez
 
-
-#TODO: Figure out a better way of plotting this - currently causes seg faults
-def surface(results, save):
-    """
-    File for plotting and saving 2D surface plots for each polarization
-    :param results: location of the results
-    :param save:    location where images should be stored
-    :return:
-    """
-    i = 0
-    for root, dirs, files in os.walk(results):
-        for name in files:
-            if ".csv" in name:
-                # Read file using pandas
-                filename = os.path.join(root, name)
-                df = pd.read_csv(filename, sep=',', header=8)
-
-                # Get data for plotting
-                x = df['X'].to_numpy()
-                y = df['Y'].to_numpy()
-                ex = df['Ex'].to_numpy()
-                if isinstance(ex[0], str):
-                    ex = np.array([ex[n].replace("i", "j") for n in range(ex.size)], dtype=complex)
-
-                ey = df['Ey'].to_numpy()
-                if isinstance(ey[0], str):
-                    ey = np.array([ey[n].replace("i", "j") for n in range(ey.size)], dtype=complex)
-
-                ez = df['Ez'].to_numpy()
-                if isinstance(ez[0], str):
-                    ez = np.array([ez[n].replace("i", "j") for n in range(ez.size)], dtype=complex)
-
-                # contourf requires z values to be MxN matrix, so we need to interpolate
-                # Create the mesh size using minimum and maximum values of x,y
-                test_dict = {'X':x, 'Y':y, 'Ex':ex, 'Ey':ey.real, 'Ez':ez.real}
-                test = pd.DataFrame(test_dict, columns=['X','Y','Ex','Ey','Ez'])
-
-                if i == 0:
-                    #test.to_csv('test.csv')
-                    numpoints = x.size
-                    X = np.linspace(x.min(), x.max(), numpoints)
-                    Y = np.linspace(y.min(), y.max(), numpoints)
-                    X, Y = np.meshgrid(X, Y)
-                    interp_x = LinearNDInterpolator(list(zip(x, y)), ex)
-                    EX = interp_x(X, Y)
-                    plt.figure(1)
-                    plt.contourf(X, Y, EX)
-                    plt.colorbar()
-                    plt.show()
-                    print(ex.size)
-                    print(ey.size)
-                    print(ez.size)
-                    print(x.size, y.size)
-                    i += 1
-    return
-
-def x_line(results, save, x=0, tol=1e-4):
-    """
-    Function for plotting intensities along lines from data obtained using COMSOL
-    :param results: filename for data from COMSOL
-    :param x:       x value of the boundary to consider data from
-    :param save:    destination for saving image files
-    :return:
-    """
-    i = 0
-    for root, dirs, files in os.walk(results):
-        for name in files:
-            if ".csv" in name:
-                # Read in data from file
-                filename = os.path.join(root, name)
-                df = pd.read_csv(filename, sep=',', header=0)
-                max_x = df['X'].to_numpy().max()
-
-                # Run query to get rows where X value is within x +/- tol
-                rows = df.query('X-@max_x <= @tol & @max_x-X <= @tol').index.to_numpy()
-                y = np.zeros(rows.size, dtype=complex)
-                ex = np.zeros(rows.size, dtype=complex)
-                ey = np.zeros(rows.size, dtype=complex)
-                ez = np.zeros(rows.size, dtype=complex)
-                for n in range(rows.size):
-                    y[n] = df.at[rows[n], 'Y']
-                    ex[n] = df.at[rows[n], 'Ex']
-                    ey[n] = df.at[rows[n], 'Ey']
-                    ez[n] = df.at[rows[n], 'Ez']
-
-                # Turn field values into intensities
-                ix = ex * ex.conj()
-                iy = ey * ey.conj()
-                iz = ez * ez.conj()
-
-                plt.figure(i)
-                plt.title(filename)
-                plt.plot(y, ix, label='X Pol.')
-                plt.plot(y, iy, label='Y Pol.')
-                plt.plot(y, iz, label='Z Pol.')
-                plt.ylabel("I")
-                plt.xlabel("y(um)")
-                plt.legend(numpoints=1)
-
-                i += 1
-    return
 
 def compare_pols(pol1, pol2, save, tol=1e-4):
     """
@@ -208,122 +172,47 @@ def compare_pols(pol1, pol2, save, tol=1e-4):
     plt.show()
     return
 
-def reflectance(results, save, tol=1e-4):
+
+def transmitted_edge(filename, yorz, tol=1e-4):
     """
-    Function for calculating the reflectance and transmittance curves for light at the outputs of our prism arrangement
-    using COMSOL simulation data
-    :param results: directory for the data
-    :param save:    location to store figure
-    :param tol:     tolerance for picking data along boundaries
-    :return:
+    Function for obtaining field values on the transmitted boundary from COMSOL data files
+    :param filename:    name of data file to get
+    :param yorz:        flag for whether the function should return the y or z component (y=1, z=0)
+    :param tol:         tolerance in x value for getting field values on boundary
+    :return:            y and field values along boundary
     """
-    # Create lists for peak input intensity and peak output intensity along either boundary
-    peak_input = []
-    peak_right = []
-    peak_top = []
-    reflected = []
-    transmittance = []
-    i = 0
-    for root, dirs, files in os.walk(results):
-        for name in files:
-            if ".csv" in name:
-                # Read in data from file
-                filename = os.path.join(root, name)
-                df = pd.read_csv(filename, sep=',', header=0)
+    # Get rows that are on boundary
+    df = pd.read_csv(filename, sep=',', header=0)
+    max_X = df['X'].to_numpy().max()
+    rows = df.query('X-@max_X <= @tol & @max_X-X <= @ @tol').index.to_numpy()
 
-                # Get x and y values for the top and right output boundaries and input
-                max_x = df['X'].to_numpy().max()
-                max_y = df['Y'].to_numpy().max()
-                min_x = df['X'].to_numpy().min()
+    # Read out relevant data
+    y = np.zeros(rows.size, dtype=complex)
+    if yorz:
+        Ey = np.zeros(rows.size, dtype=complex)
+        for n in range(rows.size):
+            y[n] = df.at[rows[n], 'Y']
+            Ey[n] = df.at[rows[n], 'Ey']
 
-                # Filter data along boundaries
-                right_rows = df.query('X-@max_x < @tol & @max_x-X < @tol').index.to_numpy()
-                top_rows = df.query('Y-@max_y < @tol & @max_y-Y < @tol').index.to_numpy()
-                left_rows = df.query('X-@min_x < @tol & @min_x-X < @tol').index.to_numpy()
+        f = interp1d(y, Ey)
+        iny = np.linspace(min(y), max(y), 100)
+        inEy = f(y)
+        return iny, inEy
+    else:
+        Ez = np.zeros(rows.size, dtype=complex)
+        for n in range(rows.size):
+            y[n] = df.at[rows[n], 'Y']
+            Ez[n] = df.at[rows[n], 'Ez']
 
-                # Input polarizations and get amplitude
-                in_x, in_y, in_ex, in_ey, in_ez = get_data(df, left_rows)
-                #in_amp = in_ex * in_ex.conj() + in_ey * in_ey.conj() + in_ez * in_ez.conj()
-
-                # Right output polarizations and get amplitude
-                rout_x, rout_y, rout_ex, rout_ey, rout_ez = get_data(df, right_rows)
-                #r_amp = rout_ex * rout_ex.conj() + rout_ey * rout_ey.conj() + rout_ez * rout_ez.conj()
-
-                # Top output polarizations and get amplitude
-                tout_x, tout_y, tout_ex, tout_ey, tout_ez = get_data(df, top_rows)
-                #t_amp = tout_ex * tout_ex.conj() + tout_ey * tout_ey.conj() + tout_ez * tout_ez.conj()
-
-                # Interpolate data so that every array has the same size
-                numpoints = 300
-                Y = np.linspace(in_y.min(), in_y.max(), numpoints)
-                in_Y = np.linspace(in_y.min(), in_y.max(), in_y.size)
-                in_interx = interp1d(in_Y, in_ex, kind='cubic')
-                in_exn = in_interx(Y)
-                in_intery = interp1d(in_Y, in_ey, kind='cubic')
-                in_eyn = in_intery(Y)
-                in_interz = interp1d(in_Y, in_ez, kind='cubic')
-                in_ezn = in_interz(Y)
-
-                X = np.linspace(tout_x.min(), tout_x.max(), numpoints)
-                tout_X = np.linspace(tout_x.min(), tout_x.max(), tout_x.size)
-                tout_interx = interp1d(tout_X, tout_ex, kind='cubic')
-                tout_exn = tout_interx(X)
-                tout_intery = interp1d(tout_X, tout_ey, kind='cubic')
-                tout_eyn = tout_intery(X)
-                tout_interz = interp1d(tout_X, tout_ez, kind='cubic')
-                tout_ezn = tout_interz(X)
-
-                rout_Y = np.linspace(rout_y.min(), rout_y.max(), rout_y.size)
-                #Y = np.linspace(rout_y.min(), rout_y.max(), numpoints)
-                rout_interx = interp1d(rout_Y, rout_ex, kind='cubic')
-                rout_exn = rout_interx(Y)
-                rout_intery = interp1d(rout_Y, rout_ey, kind='cubic')
-                rout_eyn = rout_intery(Y)
-                rout_interz = interp1d(rout_Y, rout_ez, kind='cubic')
-                rout_ezn = rout_interz(Y)
-
-                refly = tout_eyn.max()/in_eyn.max()
-                reflected.append(refly)
-                trany = rout_eyn.max()/in_eyn.max()
-                transmittance.append(trany)
-
-                #plt.figure(1)
-                #plt.plot(Y, in_eyn, label="Interp")
-                #plt.plot(in_y, in_ey, '*', label="Data")
-
-                #plt.plot(Y, rout_eyn, label="Reflected Y Pol")
-                #plt.plot(rout_y, rout_ey, '*-', label="Data")
-
-                #plt.plot(X, tout_eyn, label="Transmitted Y Pol")
-                #plt.plot(tout_x, tout_ey, '*-', label="Data")
-                #plt.legend(numpoints=1)
-                #plt.show()
-                #return
-
-
-    plt.figure(1)
-    plt.plot(reflected, label='Reflectance')
-    plt.plot(transmittance, label='Transmittance')
-    plt.legend(numpoints=1)
-    plt.xlabel("Run #")
-    plt.ylabel("Ratio")
-
-    plt.figure(2)
-    plt.plot(transmittance, label='Transmittance')
-    plt.plot(1-np.array(reflected), label='Theoretical')
-    plt.legend(numpoints=1)
-    plt.show()
-
-    return
-
+        f = interp1d(y, Ez)
+        iny = np.linspace(min(y), max(y), 100)
+        inEz = f(y)
+        return iny, inEz
 
 
 
 
 ypath = "YPol"
 zpath = "ZPol"
-#x_line(ypath, '', x=10, tol=1e-3)
-#x_line(zpath, '', x=10, tol=1e-3)
-#compare_pols(ypath, zpath, '')
-#surface(ypath, '')
-reflectance(ypath, '', tol=1e-4)
+
+test = "YPol/ypol_thickness_1.1E-7.csv"

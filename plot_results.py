@@ -173,13 +173,13 @@ def compare_pols(pol1, pol2, save, tol=1e-4):
     return
 
 
-def transmitted_edge(filename, yorz, tol=1e-4):
+def transmitted_edge(filename, tol=1e-4, numpoints=600):
     """
     Function for obtaining field values on the transmitted boundary from COMSOL data files
     :param filename:    name of data file to get
-    :param yorz:        flag for whether the function should return the y or z component (y=1, z=0)
     :param tol:         tolerance in x value for getting field values on boundary
-    :return:            y and field values along boundary
+    :param numpoints:   number of points to use in interpolation
+    :return:            y values and polarization vector for field
     """
     # Get rows that are on boundary
     df = pd.read_csv(filename, sep=',', header=0)
@@ -188,31 +188,79 @@ def transmitted_edge(filename, yorz, tol=1e-4):
 
     # Read out relevant data
     y = np.zeros(rows.size, dtype=complex)
-    if yorz:
-        Ey = np.zeros(rows.size, dtype=complex)
-        for n in range(rows.size):
-            y[n] = df.at[rows[n], 'Y']
-            Ey[n] = df.at[rows[n], 'Ey']
+    Ey = np.zeros(rows.size, dtype=complex)
+    Ez = np.zeros(rows.size, dtype=complex)
 
-        f = interp1d(y, Ey)
-        iny = np.linspace(min(y), max(y), 100)
-        inEy = f(y)
-        return iny, inEy
-    else:
-        Ez = np.zeros(rows.size, dtype=complex)
-        for n in range(rows.size):
-            y[n] = df.at[rows[n], 'Y']
-            Ez[n] = df.at[rows[n], 'Ez']
+    for n in range(rows.size):
+        y[n] = df.at[rows[n], 'Y']
+        Ey[n] = df.at[rows[n], 'Ey']
+        Ez[n] = df.at[rows[n], 'Ez']
 
-        f = interp1d(y, Ez)
-        iny = np.linspace(min(y), max(y), 100)
-        inEz = f(y)
-        return iny, inEz
+    # Interpolate Ey, Ez so that the final array has size numpoints
+    fy = interp1d(y, Ey)
+    fz = interp1d(y, Ez)
+
+    # Create new array of y values and use interpolation functions
+    ymin = df['Y'].to_numpy().min()
+    ymax = df['Y'].to_numpy().max()
+    iny = np.linspace(ymin, ymax, numpoints)
+    inEy = fy(iny)
+    inEz = fz(iny)
+
+    E = np.zeros((numpoints, 2), dtype=complex)
+    for n in range(numpoints):
+        E[n][0] = inEy[n]
+        E[n][1] = inEz[n]
+
+    return iny, E
 
 
+def get_J(yE, zE, alpha, beta, numpoints=600):
+    """
+    function to construct the coherency matrices from yE, zE and get DOP
+    :param yE:      the data from initially y-polarized field
+    :param zE:      the data from initially z-polarized field
+    :param alpha:   normalization constant for yE (1 + alpha^2 = beta^2)
+    :param beta:    normalization constant for zE (1 + alpha^2 = beta^2)
+    :return:        the coherency matrices
+    """
+    j = np.zeros((numpoints, 2, 2), dtype=complex)
+    for n in range(numpoints):
+        j[n] = alpha ** 2 * np.outer(yE[n], yE[n].conj().T) + beta ** 2 * np.outer(zE[n], zE[n].conj().T)
 
+    return j
+
+
+def get_DOP(j, numpoints=600):
+    """
+    function to get DOP from coherency matrices in j
+    :param j:           array of coherency matrices
+    :param numpoints:   number of points to use in array for DOP
+    :return:            array of DOP values
+    """
+    dop = np.zeros(numpoints, dtype=complex)
+    for n in range(numpoints):
+        s0 = j[n][0][0] + j[n][1][1]
+        s1 = j[n][0][0] - j[n][1][1]
+        s2 = j[n][0][1] + j[n][1][0]
+        s3 = -1j*(j[n][0][1] - j[n][1][0])
+        dop[n] = np.sqrt(s1**2 + s2**2 + s3**2)/s0
+
+    return dop
 
 ypath = "YPol"
 zpath = "ZPol"
 
 test = "YPol/ypol_thickness_1.1E-7.csv"
+test2 = "ZPol/zpol_thickness_1.1E-7.csv"
+y, yE = transmitted_edge(test)
+y, zE = transmitted_edge(test2)
+alpha = 1/np.sqrt(2)
+beta = 1/np.sqrt(2)
+j = get_J(yE, zE, alpha, beta)
+dop = get_DOP(j)
+
+plt.plot(y, dop)
+plt.ylabel("DOP")
+plt.xlabel("y(um)")
+plt.show()

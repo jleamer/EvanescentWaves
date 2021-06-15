@@ -411,7 +411,7 @@ for i in range(len(yfiles)):
     y, yE = transmitted_edge(yfiles[i])
     y, zE = transmitted_edge(zfiles[i])
     for k in range(alpha.size):
-        j = get_J(yE, zE, alpha[k], np.sqrt(1 - alpha[k] ** 2))
+        j = get_J(yE, zE, alpha[k], np.sqrt(1- alpha[k] ** 2))
         power[k] = get_DOP(j, y)[2]
     plt.plot(alpha**2, power, label=label)
 plt.legend(numpoints=1)
